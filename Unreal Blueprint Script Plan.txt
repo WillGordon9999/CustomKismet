@@ -1,0 +1,508 @@
+What we know so far:
+That Math Expression medium article pointed out a few key features: 
+1) A built in expression parser to generate nodes
+2) A built in Disassembler to put the VM bytecode into a more readable format
+
+Our goal should probably be centered around writing that bytecode or something
+that gets converted to that in a nicer written format
+
+Are we actually going to compile text down to byte-code, or are we just going to compile
+to nodes thanks to Math Expression Parser?
+
+For a code parser, I think ideally instead of just splitting a string based on one character to get n more strings
+It's best to record the indices of all delimiters, so for a C-like language, first find all indices of semicolons, then all indices of spaces, then parentheses, then commas
+All of this might be possible on a ParallelFor like context.
+
+Create different categories of tokens:
+range tokens like () {} [], possibly ;
+variable/constant tokens
+operator tokens + - * / etc
+
+Alternatively though, would this really be faster than just one scan going through and recording individual tokens and putting them onto a stack and/or other recording structures?
+Admittedly the single threaded first pass seeking only semicolons would always be fasters since it's simply doing less
+Also, if you were worried about string inserts or other tokens being too costly to insert, you can probably just store the ranges of tokens and their respective category and from there later deduce any duplicates or other operations.
+Also, could probably just divide the string into even increments and parallelize.
+
+9/11:
+Need to define a Constructor or something for the class, that's what it's currently upset about
+
+9/12:
+CURRENT OBJECTIVES
+TRY TO SEE IF IT IS POSSIBLE TO COPY PASTE ANGELSCRIPT SOURCE DIRECTLY INTO EITHER ENGINE SOURCE OR PROJECT SOURCE
+BETTER YET, PERHAPS THE SEPARATE EMPTY PLUGIN WE CREATED IN PCGHYPE
+
+IF THE ABOVE FAILS TRY LOOKING INTO THE MATH EXPRESSIONS NODES TO SEE IF IT MIGHT BE POSSIBLE TO GENERALIZE IT
+TO MORE NODES IN OUR OWN VERSION TO BASICALLY WRITE SCRIPT THAT CREATES NODES FOR US
+
+IF THE ABOVE ALSO FAILS, THEN YOU CAN TRY MAKING YOUR OWN MICRO VM AND EITHER WE MAKE A LARGE SWITCH STATEMENT/JUMP TABLE
+AND WE CALL UFUNCTION PROCESS EVENTS WHEN NECESSARY
+
+General Notes Start Here:
+Apparently the opcodes for the bytecode have a direct relationship with several DEFINE_FUNCTION and IMPLEMENT_VM_FUNCTION
+macros in use in ScriptCore.cpp
+
+Data like FunctionNames will get baked into the bytecode
+Need to refresh on where/how parameters are if at all
+
+GNativeFuncNames[EX_Max]; This may be the array defining all instructions
+
+General Notes for Creating a UClass or UStruct
+CustomContainerClass = NewObject<UClass>(GetOutermost(), FName(TEXT("Parameterization")), RF_Transient);
+CustomContainerClass->SetSuperStruct( UDataprepParameterizableObject::StaticClass() );
+
+AddToRoot can be combined with RF_Transient
+FAssetRegistryModule::AssetCreated( DataTable );
+FKismetCompilerContext::CreateUserDefinedLocalVariablesForFunction
+Also can create our own Package with UPackage::CreatePackage(Name)
+Important to remember that UFactory exists
+
+Full Compilation Chain:
+FBlueprintEditor::Compile
+FKismetEditorUtilities::CompileBlueprint
+FBlueprintCompilationManager::CompileSynchronously
+FBlueprintCompilationManager::FlushCompilationQueueImpl
+(Possibly) KismetCompiler::GenerateClassLayout
+KismetCompiler::CompileFunctions
+KismetCompilerBackend::GenerateCodeFromClass
+ConstructFunction
+GenerateCodeForStatement
+
+FlushCompilationQueueImpl is the main sequence for all stages of compilation
+FlushReinstancingQueue immediately follows the above
+
+Breakdown of Flush Compilation Queue
+
+Stage 1: Add any related Blueprints that were not compiled, then add any children so that they will be relinked
+Add Dependent Macro Libraries
+Recompile ByteCode Dependents (for cases of function signature changes)
+Add any dependent blueprints for bytecode compile (Achieved via FBlueprintEditorUtils::GetDependentBlueprints(UBlueprint*, TArray<UBlueprint*>))
+
+Stage 2: Filter out data only and interface blueprints
+Recompile Child Blueprints
+Clear CompileBPs to prevent Pending Kill blueprints from being recompiled
+
+Stage 3: Sort into correct compilation order, compile base classes before child classes
+
+Stage 4: Set UBlueprint Flags (BeingCompiled, IsRegeneratingOnLoad)
+Skip if you shoulnd't set any temporary flags
+
+Stage 5: Validate Variable Names and Class Property Defaults
+Give the Blueprint the possibility for edits
+
+Stage 6: Purge null graphs, misc data fixup
+
+Stage 7: Discard old skeleton CDOs
+
+Stage 8: Recompile Skeleton
+-If any function signatures have changed in this skeleton class, we will need to recompile all dependencies, Otherwise, skip dependency recompilation
+-Map New Function signatures to old function signatures
+-Relink Skeleton Class: Bind, StaticLink, GetDefaultObject(RF_Transient)
+-Fixup any Delegate Properties
+-Skip further compilation for blueprints that are being bytecode compiled 
+as a dependency of something that has not had a change in its function parameters
+-Detect any variable based properties that are not in the old generated class, save them for after reinstancing.  This can occur
+when a new variable is introduced in an ancestor class, and we'll need to use its default as our generated class's initial value
+
+Stage 9: Reconstruct nodes and replace deprecated nodes, then broadcast precompile
+-Some nodes are setup to do things during reconstruction only when RegeneratingOnLoad flag is not set
+-Broadcast Precompile
+-If in Editor, Update Search MetaData
+-Blueprint is now regenerated
+
+Stage 10: Reinstance every blueprint that is queued, note that this means classes in the hierarchy that are *not* being 
+compiled will be parented to REINST versions of the class, so type checks (IsA, etc) involving those types will be incoherent!
+-Skip reinstancing skeleton or relink jobs that are not in a hierarchy that has had reinstancing initiated
+-Collect Old CDOs
+-Create new instance of FBlueprintCompileReinstancer as shared pointer
+-Set Old version of class as DuplicateClass of Reinstancer if new class is valid
+
+Stage 11: Reinstancing is done, now let's fix up child->parent pointers
+-Newly generated classes have their SuperStructs set
+
+Stage 12: Recompile every Blueprint on Line 1354, BlueprintCompilationManager.cpp
+-CDO pointer gets cleared
+
+-Execute FKismetCompilerContext.CompileClassLayout is KismetCompiler.cpp line 4597
+Backwards compatibility:  If SkeletonGeneratedClass == GeneratedClass, we need to make a new generated class the first time we need it
+FKismetCompilerContext::SpawnNewClass includes FBlueprintCompileReinstancer::Create(NewClass)
+Early Validation of all nodes, Validate Variable Names
+Set OldCDO to null, cache linker addresses to fixup linker for old CDO
+
+FKismetCompilerContext::CleanAndSanitizeClass
+FName TransientClassName = MakeUniqueObjectName(GetTransientPackage(), UBlueprintGeneratedClass::StaticClass(), FName(*TransientClassString));
+UClass* TransientClass = NewObject<UBlueprintGeneratedClass>(GetTransientPackage(), TransientClassName, RF_Public | RF_Transient);
+
+TransientClass->CppClassStaticFunctions = ParentClass->CppClassStaticFunctions;
+TransientClass->ClassGeneratedBy = Blueprint;
+TransientClass->ClassFlags |= CLASS_CompiledFromBlueprint|CLASS_NewerVersionExists;
+
+Clean all subobjects via GetObjectsWithOuter, most notably the Functions
+
+for( UObject* CurrSubObj : ClassSubObjects )
+{
+	if(UFunction* Function = Cast<UFunction>(CurrSubObj))
+	{
+		Function->Script.Empty();
+		Function->ScriptAndPropertyObjectReferences.Empty();
+		Function->DestroyChildPropertiesAndResetPropertyLinks();
+		Function->StaticLink(/*bRelinkExistingProperties =*/ true);
+	}
+}
+
+Conform to parent functions and implemented events and interfaces
+
+Register delegate proxy functions and the captured actor variables
+RegisterClassDelegateProxiesFromBlueprint
+
+Create Variables with CreateClassVariablesFromBlueprint()
+FKismetCompilerContext::CreateVariable(VarName, VarType) -> FKismetCompilerUtilities::CreatePropertyOnScope -> 
+CreatePrimitiveProperty, Containers are constructed directly by FMapProperty, FArrayProperty, FSetProperty
+Set Appropriate metadata on variables
+
+Add Interfaces From Blueprint
+CreateFunctionList
+
+Precompile Functions via PrecompileFunction
+CreateVariables for PersistentUberGraphFrame
+Bind and StaticLink
+
+-Relink all child classes via GetDerivedClasses, and iterate on Children with Bind() and StaticLink()
+
+Stage 13: Compile Functions BlueprintCompilationManager Line 1406
+if (!ShouldCompileClassFunctions()) Bind, StaticLink, clear CDO, GetCDO
+
+Call FKismetCompilerContext::CompileFunctions()
+CreateLocalsAndRegisterNets()-> CreateUserDefinedLocalVariablesForFunction(Context, FField**& PropertyLocation)
+CreateLocalVariablesForFunction(Context, PropertyLocation)
+
+FKismetCompilerContext::CompileFunction()
+Generally seems to set a lot of nodes metadata and such
+
+PostCompileFunctions() Patch up cross-references and perform final validation
+Sort Linear Execution List of FBlueprintCompiledStatements
+FinishCompilingFunctions * 2
+
+Intermediate Graph Stuff
+Late Delegate Validation
+
+FinishCompilingClass Set Final Flags, seal class, build CDO
+
+Build Dynamic Binding Objects
+Set New CDO
+Propagate Parent Blueprint Defaults
+FKismetCompilerContext::PropagateValuesToCDO(UObject* New, UObject* Old) which contains
+IMPORTANT FKismetCompilerContext::CopyTermsToDefaultObject
+Update Custom Property List for Post Construction
+
+Finally we get to KismetCompilerVMBackend::GenerateCodeFromClass(FKismetCompilerContext*, TIndirectArray<FKismetFunctionContext> FunctionList, bool)
+GENERATE BYTE-CODE
+
+//END GENERAL COMPILE CHAIN
+
+Another Important Note about bytecode, for any data structure or string, there are opcodes for start and end respectively, e.g. EX_SetStruct and EX_EndStruct
+
+For filling out the properties that are written directly into the bytecode in FScriptBuilderBase::StartContext KismetCompilerVMBackend Line 363
+// Skip offset if the expression evaluates to null (counting from later on)
+FSkipOffsetEmitter Skipper(ScriptBuilder.Writer.ScriptBuffer);
+Skipper.Emit();
+
+// R-Value property, see ReadVariableSize in UObject::ProcessContextOpcode() for usage
+Writer << RValueProperty;
+
+// Context expression (this is the part that gets skipped if the object turns out NULL)
+Skipper.BeginCounting();
+
+SkipperStack.Push( Skipper );
+
+CRITICAL: Fill ScriptAndPropertyObjectReferences arrays in Functions - That seems to be performed in this loop
+for (FKismetFunctionContext& FunctionContext : FunctionList)
+{
+	if (FunctionContext.IsValid())
+	{
+		UFunction* Function = FunctionContext.Function; 
+		FArchiveScriptReferenceCollector ObjRefCollector(Function->ScriptAndPropertyObjectReferences);
+		for (int32 iCode = 0; iCode < Function->Script.Num();)
+		{
+			Function->SerializeExpr(iCode, ObjRefCollector);
+		}
+	}
+}
+
+Wait Comment ByteCodes are actually Object references baked into the bytecode?
+ObjRefCollector is how object references seem to get serialized into the UFunction
+
+//For Serializing ScriptSerialization.h is important
+Property->ExportTextInContainer
+UScriptStruct.ImportText
+
+//Is this what I was seeking all along for Serializable Function Calls (with probably a few changes)
+
+This snippet is found in KismetCompiler.cpp Line 5000, which is in FKismetCompilerContext::CompileFunctions
+UFunction* Function = FunctionContext.Function; 
+FArchiveScriptReferenceCollector ObjRefCollector(Function->ScriptAndPropertyObjectReferences);
+for (int32 iCode = 0; iCode < Function->Script.Num();)
+{
+	Function->SerializeExpr(iCode, ObjRefCollector);
+}
+
+//How Variables get written in a term expression
+check(Term->AssociatedVarProperty);
+if (Term->IsDefaultVarTerm())
+{
+	Writer << EX_DefaultVariable;
+}
+else if (Term->IsLocalVarTerm())
+{
+	Writer << (Term->AssociatedVarProperty->HasAnyPropertyFlags(CPF_OutParm) ? EX_LocalOutVariable : EX_LocalVariable);
+}
+else if (Term->IsSparseClassDataVarTerm())
+{
+	Writer << EX_ClassSparseDataVariable;
+}
+else
+{
+	Writer << EX_InstanceVariable;
+}
+Writer << Term->AssociatedVarProperty;
+
+FScriptBuilderBase:
+EmitDestinationExpr Examples on declaring certain variables
+EmitTermExpr Starting from Line 1096 Processing for member or local variables in expression
+FDefaultValueHelper is a class for setting default primitive structs i.e. Vector, Transform, Rotator, etc
+UScriptStruct->ImportText seems like an important function to keep in mind
+
+Side-Note: FBlueprintDebugData::RegisterNodeToCodeAssociation on line 403 BlueprintGeneratedClass.h is how Debug points are registered
+
+FKismetCompilerContext::SetCalculatedMetaDataAndFlags in KismetCompiler.cpp line 2823
+Seems to be responsible for setting properties size and other params
+
+//Expression Processing
+FOperatorTable in K2Node_MathExpressions Rebuild on line 812
+FMemberReference as a means to reference members apparently
+
+ACTUAL NOTES START HERE:
+
+Might need to set Function->FirstPropertyToInit --Done
+I forgot about Function Flags
+
+BP Version 
+MinAlignment 4 
+PropertiesSize 8, 
+PropertyLink = Local 
+PropertyLink->Next = Return value of Add_IntInt
+PostConstructLink = Local
+PostConstructLink->PropertyLinkNext = Return value of Add_IntInt
+PostConstructLink->PostConstructLinkNext = Return value of Add_IntInt
+ScriptAndPropertyObjectReferences = Return value of Add_IntInt
+
+Stack->PropertyChainForCompiledIn starts at Local
+
+For Setting Properties we have CopyCompleteValue_InContainer
+
+From CleanAndSanitizeClass KismetCompiler.cpp Line 727
+// Purge the class to get it back to a "base" state
+bool bLayoutChanging = ClassToClean->bLayoutChanging;
+ClassToClean->PurgeClass(bRecompilingOnLoad);
+
+// Set properties we need to regenerate the class with
+ClassToClean->PropertyLink = ParentClass->PropertyLink;
+ClassToClean->SetSuperStruct(ParentClass);
+ClassToClean->ClassWithin = ParentClass->ClassWithin ? ParentClass->ClassWithin : UObject::StaticClass();
+ClassToClean->ClassConfigName = ClassToClean->IsNative() ? FName(ClassToClean->StaticConfigName()) : ParentClass->ClassConfigName;
+ClassToClean->DebugData = FBlueprintDebugData();
+
+FOR EXECUTION:
+All Start in ProcessEvent as I believe we knew
+
+ScriptCore starting at Line 807 Global Script Execution Functions including initial setup from byte code
+ProcessLocalScriptFunction at Line 1164 Executes the actual bytecode in a bp-defined function
+ProcessScriptFunction is general setup before executing a script defined function, allocating stack, initializing parameters,
+then calls the above local version, and cleans up after it's done
+
+Of Course FFrame is responsible for all BP execution, holding the current code
+the relevant variables, locals, most recents etc.
+
+Stack.Step increments the value dereferenced at FFrame.Code byte array
+
+ProcessLocalScriptFunction obtains the UFunction to execute from Stack.Node casted
+
+UObject ProcessInternal seems to be where ProcessEvent goes when not calling a native function
+
+Probably all the setup for calling some of these functions is just from PostLoad
+and/or the Serialization FArchive, and anything from the CDO (Class Default Object)
+
+Tangent idea: Code written in two columns data table style: CODE and DATA where data defines variables and declarations, CODE specifies instructions, two separate byte arrays
+
+COMPILER TEST BYTE CODE DISASSEMBLY Add Ints Member and Local
+
+BlueprintLog: New page: Compile CompilerTest
+LogK2Compiler: [function Test]:
+Label_0x0:
+     $5E: .. debug site ..
+Label_0x1:
+     $5A: .. wire debug site ..
+Label_0x2:
+     $5E: .. debug site ..
+Label_0x3:
+     $F: Let (Variable = Expression)
+       Variable:
+         $0: Local variable of type int32 named Local.
+       Expression:
+         $1D: literal int32 5
+Label_0x1A:
+     $5A: .. wire debug site ..
+Label_0x1B:
+     $F: Let (Variable = Expression)
+       Variable:
+         $0: Local variable of type int32 named CallFunc_Add_IntInt_ReturnValue.
+       Expression:
+         $68: Call Math (stack node KismetMathLibrary::Add_IntInt)
+           $1: Instance variable of type int32 named Member.
+           $0: Local variable of type int32 named Local.
+           $16: EX_EndFunctionParms
+Label_0x49:
+     $5E: .. debug site ..
+Label_0x4A:
+     $F: Let (Variable = Expression)
+       Variable:
+         $1: Instance variable of type int32 named Member.
+       Expression:
+         $0: Local variable of type int32 named CallFunc_Add_IntInt_ReturnValue.
+Label_0x65:
+     $5A: .. wire debug site ..
+Label_0x66:
+     $4: Return expression
+       $B: EX_Nothing
+Label_0x68:
+     $53: EX_EndOfScript
+
+///////////////////////////////////////
+
+COMPILER TEST BYTECODE DISASSEMBLY Set VectorTest to Vector.zero
+BlueprintLog: New page: Compile CompilerTest
+LogK2Compiler: [function Test]:
+Label_0x0:
+     $5E: .. debug site ..
+Label_0x1:
+     $5A: .. wire debug site ..
+Label_0x2:
+     $5E: .. debug site ..
+Label_0x3:
+     $F: Let (Variable = Expression)
+       Variable:
+         $0: Local variable of type int32 named Local.
+       Expression:
+         $1D: literal int32 5
+Label_0x1A:
+     $5A: .. wire debug site ..
+Label_0x1B:
+     $5E: .. debug site ..
+Label_0x1C:
+     $F: Let (Variable = Expression)
+       Variable:
+         $1: Instance variable of type FVector named VectorTest.
+       Expression:
+         $23: literal vector (0.000000,0.000000,0.000000)
+Label_0x47:
+     $5A: .. wire debug site ..
+Label_0x48:
+     $4: Return expression
+       $B: EX_Nothing
+Label_0x4A:
+     $53: EX_EndOfScript
+
+///////////////////////////////
+
+BYTECODE DISASSEMBLY Set Box Sphere Bounds
+LogK2Compiler: [function Test]:
+Label_0x0:
+     $5E: .. debug site ..
+Label_0x1:
+     $5A: .. wire debug site ..
+Label_0x2:
+     $5E: .. debug site ..
+Label_0x3:
+     $F: Let (Variable = Expression)
+       Variable:
+         $0: Local variable of type int32 named Local.
+       Expression:
+         $1D: literal int32 5
+Label_0x1A:
+     $5A: .. wire debug site ..
+Label_0x1B:
+     $F: Let (Variable = Expression)
+       Variable:
+         $0: Local variable of type FBoxSphereBounds named CallFunc_MakeBoxSphereBounds_ReturnValue.
+       Expression:
+         $68: Call Math (stack node KismetMathLibrary::MakeBoxSphereBounds)
+           $23: literal vector (0.000000,0.000000,0.000000)
+           $23: literal vector (0.000000,0.000000,0.000000)
+           $1E: literal float 0.000000
+           $16: EX_EndFunctionParms
+Label_0x6E:
+     $5E: .. debug site ..
+Label_0x6F:
+     $F: Let (Variable = Expression)
+       Variable:
+         $1: Instance variable of type FBoxSphereBounds named StructTest.
+       Expression:
+         $0: Local variable of type FBoxSphereBounds named CallFunc_MakeBoxSphereBounds_ReturnValue.
+Label_0x8A:
+     $5A: .. wire debug site ..
+Label_0x8B:
+     $4: Return expression
+       $B: EX_Nothing
+Label_0x8D:
+     $53: EX_EndOfScript
+
+////////////////////////////////////////
+BYTECODE DISASSEMBLY for Make VectorArray
+LogK2Compiler: [function Test]:
+Label_0x0:
+     $5E: .. debug site ..
+Label_0x1:
+     $5A: .. wire debug site ..
+Label_0x2:
+     $5E: .. debug site ..
+Label_0x3:
+     $F: Let (Variable = Expression)
+       Variable:
+         $0: Local variable of type int32 named Local.
+       Expression:
+         $1D: literal int32 5
+Label_0x1A:
+     $5A: .. wire debug site ..
+Label_0x1B:
+     $31: set array
+       $0: Local variable of type TArray<FVector> named K2Node_MakeArray_Array. Parameter flags: (Reference).
+       $23: literal vector (0.000000,0.000000,0.000000)
+       $23: literal vector (1.000000,1.000000,1.000000)
+       $23: literal vector (2.000000,2.000000,2.000000)
+       $32: EX_EndArray
+Label_0x71:
+     $F: Let (Variable = Expression)
+       Variable:
+         $42: Struct member context 
+           Member named Array_3_E60123FF4C760FA78D79E99A93FD3266 @ offset 0
+           Expression to struct:
+             $0: Local variable of type FVectorArray named K2Node_MakeStruct_VectorArray.
+       Expression:
+         $0: Local variable of type TArray<FVector> named K2Node_MakeArray_Array. Parameter flags: (Reference).
+Label_0x95:
+     $5E: .. debug site ..
+Label_0x96:
+     $F: Let (Variable = Expression)
+       Variable:
+         $0: Local variable of type FVectorArray named VecArray.
+       Expression:
+         $0: Local variable of type FVectorArray named K2Node_MakeStruct_VectorArray.
+Label_0xB1:
+     $5A: .. wire debug site ..
+Label_0xB2:
+     $4: Return expression
+       $B: EX_Nothing
+Label_0xB4:
+     $53: EX_EndOfScript
+
+
+

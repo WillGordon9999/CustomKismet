@@ -1,0 +1,73 @@
+Step by Step Writer Calls:
+Writer << EX_TracePoint;
+Writer << EX_WireTracepoint;
+Writer << EX_TracePoint;
+Writer << EX_Let;
+Writer << DestinationExpression->AssociatedVarProperty; //Local variable Local
+Writer << (Term->AssociatedVarProperty->HasAnyPropertyFlags(CPF_OutParm) ? EX_LocalOutVariable : EX_LocalVariable); //In this case probably the second
+Writer << Term->AssociatedVarProperty;
+Writer << EX_IntConst;
+Writer << value; //Write the literal value 5 obtained via int32 value = FCString::Atoi(*(Term->Name));
+Writer << EX_WireTracepoint;	//For upcoming function call return value gets ignored when checking number of parameters
+Writer << EX_Let; //Declare the return variable for add int function call
+Writer << DestinationExpression->AssociatedVarProperty; //Where Property = "CallFunc_Add_IntInt_ReturnValue"	FProperty * {FIntProperty}
+Writer << (Term->AssociatedVarProperty->HasAnyPropertyFlags(CPF_OutParm) ? EX_LocalOutVariable : EX_LocalVariable); //Probably Second
+Writer << Term->AssociatedVarProperty;
+Writer << EX_CallMath;
+Writer << FunctionToCall; //This is a UFunction* This apparently does not have a native index
+Writer << EX_InstanceVariable;
+Writer << Term->AssociatedVarProperty; //Push Member onto stack
+Writer << (Term->AssociatedVarProperty->HasAnyPropertyFlags(CPF_OutParm) ? EX_LocalOutVariable : EX_LocalVariable);
+Writer << Term->AssociatedVarProperty; //Push Local onto stack
+Writer << EX_EndFunctionParms;
+Writer << EX_TracePoint; //Start Assign the result to Member
+Writer << EX_Let;
+Writer << DestinationExpression->AssociatedVarProperty;
+Writer << EX_InstanceVariable;
+Writer << Term->AssociatedVarProperty;
+Writer << (Term->AssociatedVarProperty->HasAnyPropertyFlags(CPF_OutParm) ? EX_LocalOutVariable : EX_LocalVariable);
+Writer << Term->AssociatedVarProperty; //Return Value of Add Function
+Writer << EX_WireTracepoint;
+Writer << EX_Return;
+Writer << EX_Nothing;
+Writer << EX_EndOfScript;
+
+//Fix Up Jump Targets FScriptBuilderBase::PerformFixups KismetCompilerVMBackend.cpp line 2224
+//Close the ScriptWriter
+//CopyStatementMaptoUbergraphMap() Does an Ubergraph mean it is the root graph and not any collapsed nodes or macros
+
+Script Buffer Values at Each Step:
+"^"
+"^Z"
+"^Z^"
+"^Z^\xf" //seemed to change somewhere from \x11
+"^Z^\xf€ÏËpè\b\0\0" //^Z^€ÏËpè
+"^Z^\xf€ÏËpè\b\0\0t"
+"^Z^\xf€ÏËpè\b\0\0\0"
+"^Z^\xf€ÏËpè\b\0\0\0\0_\0R\0e\0t"
+"^Z^\xf€ÏËpè\b\0\0\0€ÏËpè\b\0\0"
+"^Z^\xf€ÏËpè\b\0\0\0€ÏËpè\b\0\0\x1d\x5\0\0\0"
+"^Z^\xf€ÏËpè\b\0\0\0€ÏËpè\b\0\0\x1d\x5\0\0\0Z"
+"^Z^\xf€ÏËpè\b\0\0\0€ÏËpè\b\0\0\x1d\x5\0\0\0Z\xf"
+Num=36"^Z^\xf€ÏËpè\b\0\0\0€ÏËpè\b\0\0\x1d\x5\0\0\0Z\xfàµËpè\b\0\0"
+Num=37 "^Z^\xf€ÏËpè\b\0\0\0€ÏËpè\b\0\0\x1d\x5\0\0\0Z\xfàµËpè\b\0\0\0"
+Num=45 "^Z^\xf€ÏËpè\b\0\0\0€ÏËpè\b\0\0\x1d\x5\0\0\0Z\xfàµËpè\b\0\0\0àµËpè\b\0\0"
+Num=46 "^Z^\xf€ÏËpè\b\0\0\0€ÏËpè\b\0\0\x1d\x5\0\0\0Z\xfàµËpè\b\0\0\0àµËpè\b\0\0h"
+Num=54 "^Z^\xf€ÏËpè\b\0\0\0€ÏËpè\b\0\0\x1d\x5\0\0\0Z\xfàµËpè\b\0\0\0àµËpè\b\0\0h\0 XÑç\b\0\0"
+Num=63 "^Z^\xf€ÏËpè\b\0\0\0€ÏËpè\b\0\0\x1d\x5\0\0\0Z\xfàµËpè\b\0\0\0àµËpè\b\0\0h\0 XÑç\b\0\0\x1€ÞËpè\b\0\0"
+Num=72 "^Z^\xf€ÏËpè\b\0\0\0€ÏËpè\b\0\0\x1d\x5\0\0\0Z\xfàµËpè\b\0\0\0àµËpè\b\0\0h\0 XÑç\b\0\0\x1€ÞËpè\b\0\0\0€ÏËpè\b\0\0"
+Num=73 "^Z^\xf€ÏËpè\b\0\0\0€ÏËpè\b\0\0\x1d\x5\0\0\0Z\xfàµËpè\b\0\0\0àµËpè\b\0\0h\0 XÑç\b\0\0\x1€ÞËpè\b\0\0\0€ÏËpè\b\0\0\x16"
+Num=74 "^Z^\xf€ÏËpè\b\0\0\0€ÏËpè\b\0\0\x1d\x5\0\0\0Z\xfàµËpè\b\0\0\0àµËpè\b\0\0h\0 XÑç\b\0\0\x1€ÞËpè\b\0\0\0€ÏËpè\b\0\0\x16^"
+Num=75 "^Z^\xf€ÏËpè\b\0\0\0€ÏËpè\b\0\0\x1d\x5\0\0\0Z\xfàµËpè\b\0\0\0àµËpè\b\0\0h\0 XÑç\b\0\0\x1€ÞËpè\b\0\0\0€ÏËpè\b\0\0\x16^\xf"
+Num=83 "^Z^\xf€ÏËpè\b\0\0\0€ÏËpè\b\0\0\x1d\x5\0\0\0Z\xfàµËpè\b\0\0\0àµËpè\b\0\0h\0 XÑç\b\0\0\x1€ÞËpè\b\0\0\0€ÏËpè\b\0\0\x16^\xf€ÞËpè\b\0\0"
+Num=84 "^Z^\xf€ÏËpè\b\0\0\0€ÏËpè\b\0\0\x1d\x5\0\0\0Z\xfàµËpè\b\0\0\0àµËpè\b\0\0h\0 XÑç\b\0\0\x1€ÞËpè\b\0\0\0€ÏËpè\b\0\0\x16^\xf€ÞËpè\b\0\0\x1"
+Num=92 "^Z^\xf€ÏËpè\b\0\0\0€ÏËpè\b\0\0\x1d\x5\0\0\0Z\xfàµËpè\b\0\0\0àµËpè\b\0\0h\0 XÑç\b\0\0\x1€ÞËpè\b\0\0\0€ÏËpè\b\0\0\x16^\xf€ÞËpè\b\0\0\x1€ÞËpè\b\0\0"
+Num=101 "^Z^\xf€ÏËpè\b\0\0\0€ÏËpè\b\0\0\x1d\x5\0\0\0Z\xfàµËpè\b\0\0\0àµËpè\b\0\0h\0 XÑç\b\0\0\x1€ÞËpè\b\0\0\0€ÏËpè\b\0\0\x16^\xf€ÞËpè\b\0\0\x1€ÞËpè\b\0\0\0àµËpè\b\0\0"
+Num=102 "^Z^\xf€ÏËpè\b\0\0\0€ÏËpè\b\0\0\x1d\x5\0\0\0Z\xfàµËpè\b\0\0\0àµËpè\b\0\0h\0 XÑç\b\0\0\x1€ÞËpè\b\0\0\0€ÏËpè\b\0\0\x16^\xf€ÞËpè\b\0\0\x1€ÞËpè\b\0\0\0àµËpè\b\0\0Z"
+Num=103 "^Z^\xf€ÏËpè\b\0\0\0€ÏËpè\b\0\0\x1d\x5\0\0\0Z\xfàµËpè\b\0\0\0àµËpè\b\0\0h\0 XÑç\b\0\0\x1€ÞËpè\b\0\0\0€ÏËpè\b\0\0\x16^\xf€ÞËpè\b\0\0\x1€ÞËpè\b\0\0\0àµËpè\b\0\0Z\x4"
+Num=104 "^Z^\xf€ÏËpè\b\0\0\0€ÏËpè\b\0\0\x1d\x5\0\0\0Z\xfàµËpè\b\0\0\0àµËpè\b\0\0h\0 XÑç\b\0\0\x1€ÞËpè\b\0\0\0€ÏËpè\b\0\0\x16^\xf€ÞËpè\b\0\0\x1€ÞËpè\b\0\0\0àµËpè\b\0\0Z\x4\v"
+Num=105 "^Z^\xf€ÏËpè\b\0\0\0€ÏËpè\b\0\0\x1d\x5\0\0\0Z\xfàµËpè\b\0\0\0àµËpè\b\0\0h\0 XÑç\b\0\0\x1€ÞËpè\b\0\0\0€ÏËpè\b\0\0\x16^\xf€ÞËpè\b\0\0\x1€ÞËpè\b\0\0\0àµËpè\b\0\0Z\x4\vS"
+
+
+
+
